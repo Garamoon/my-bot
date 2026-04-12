@@ -102,39 +102,100 @@ def human_delay(mn=0.5, mx=1.5):
 
 
 # ─── Scraper ─────────────────────────────────────────────────────────────────
+def handle_cookie_popup(driver):
+    try:
+        wait = WebDriverWait(driver, 5)
+
+        # Try accept button
+        try:
+            btn = wait.until(EC.element_to_be_clickable((
+                By.XPATH, "//button[contains(., 'Accept')]"
+            )))
+            btn.click()
+            log.info("✅ Cookie accepted")
+            human_delay(1, 2)
+            return
+        except:
+            pass
+
+        # Try alternative button text
+        try:
+            btn = wait.until(EC.element_to_be_clickable((
+                By.XPATH, "//button[contains(., 'I agree')]"
+            )))
+            btn.click()
+            log.info("✅ Cookie accepted (alt)")
+            human_delay(1, 2)
+            return
+        except:
+            pass
+
+        # Force remove overlay
+        driver.execute_script("""
+            let el = document.querySelector('.qc-cmp2-consent-info');
+            if (el) el.remove();
+        """)
+        log.info("⚠️ Cookie overlay removed manually")
+
+    except Exception as e:
+        log.warning(f"Cookie handler error: {e}")
+
+
+def safe_click(driver, element):
+    try:
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", element)
+        human_delay(0.5, 1.0)
+        element.click()
+    except:
+        log.warning("Normal click failed → using JS click")
+        driver.execute_script("arguments[0].click();", element)
+
+
 def scrape_opgg(server: str, game_name: str, hashtag: str) -> dict:
     url = f"https://www.op.gg/lol/summoners/{server}/{game_name}-{hashtag}?queue_type=ARAM"
     log.info(f"Opening: {url}")
+
     driver = create_driver()
     wait   = WebDriverWait(driver, 20)
+
     try:
         driver.get(url)
+
         wait.until(lambda d: d.execute_script("return document.readyState") == "complete")
         human_delay(1.5, 2.5)
 
+        # Cloudflare handling
         if "Just a moment" in driver.title:
             log.warning("Cloudflare detected, waiting…")
             human_delay(8, 12)
 
+        # ✅ FIX 1: handle cookies
+        handle_cookie_popup(driver)
+
         # Update button
         try:
-            update_btn = WebDriverWait(driver, 8).until(EC.element_to_be_clickable((
+            update_btn = WebDriverWait(driver, 10).until(EC.presence_of_element_located((
                 By.XPATH, "//button[.//span[normalize-space()='Update']]"
             )))
-            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", update_btn)
-            human_delay(0.5, 1.0)
-            update_btn.click()
-            log.info("Clicked Update, waiting for refresh…")
+
+            # wait until clickable after cookie removed
+            WebDriverWait(driver, 10).until(EC.element_to_be_clickable((
+                By.XPATH, "//button[.//span[normalize-space()='Update']]"
+            )))
+
+            safe_click(driver, update_btn)
+
+            log.info("Clicked Update")
+
             try:
                 WebDriverWait(driver, 35).until(EC.staleness_of(update_btn))
             except TimeoutException:
-                try:
-                    WebDriverWait(driver, 10).until(EC.invisibility_of_element(update_btn))
-                except TimeoutException:
-                    log.warning("Update btn still visible – continuing.")
-            human_delay(1.0, 2.0)
+                log.warning("Update didn't refresh fully")
+
+            human_delay(1.5, 2.5)
+
         except TimeoutException:
-            log.info("No Update button – already fresh.")
+            log.info("No Update button – already fresh")
 
         # Level
         level = wait.until(EC.presence_of_element_located((By.XPATH,
@@ -142,7 +203,7 @@ def scrape_opgg(server: str, game_name: str, hashtag: str) -> dict:
         ))).text.strip()
 
         # KDA
-        kda_el  = wait.until(EC.presence_of_element_located((By.XPATH,
+        kda_el = wait.until(EC.presence_of_element_located((By.XPATH,
             "//div[contains(@data-tooltip-content,'/ D') and contains(text(),'KDA')]"
         )))
         kda     = kda_el.text.strip()
@@ -154,21 +215,29 @@ def scrape_opgg(server: str, game_name: str, hashtag: str) -> dict:
         ))).text.strip()
 
         log.info(f"Level={level} | KDA={kda} ({kda_raw}) | WR={win_rate}")
-        return {"success": True, "summoner": f"{game_name}#{hashtag}",
-                "server": server.upper(), "level": level,
-                "kda": kda, "kda_raw": kda_raw,
-                "win_rate": win_rate, "url": url}
+
+        return {
+            "success": True,
+            "summoner": f"{game_name}#{hashtag}",
+            "server": server.upper(),
+            "level": level,
+            "kda": kda,
+            "kda_raw": kda_raw,
+            "win_rate": win_rate,
+            "url": url
+        }
 
     except TimeoutException:
-        try: driver.save_screenshot("/tmp/opgg_debug.png")
-        except: pass
-        return {"success": False, "error": "⏱️ انتهى الوقت – تأكد إن الاسم صح أو جرّب بعدين."}
-    except NoSuchElementException as e:
-        log.error(e)
-        return {"success": False, "error": "❌ مش لاقي العنصر – ممكن الموقع اتغير."}
+        try:
+            driver.save_screenshot("/tmp/opgg_debug.png")
+        except:
+            pass
+        return {"success": False, "error": "⏱️ Timeout – جرّب تاني"}
+
     except Exception as e:
         log.error(e)
-        return {"success": False, "error": f"❌ خطأ: {e}"}
+        return {"success": False, "error": f"❌ {e}"}
+
     finally:
         driver.quit()
 
