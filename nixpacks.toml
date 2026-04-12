@@ -1,0 +1,12 @@
+[phases.setup]
+nixPkgs = [
+  "chromium",
+  "chromiumdriver",
+  "xvfb-run"
+]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
+
+[start]
+cmd = "xvfb-run -a python opgg_bot.py"
