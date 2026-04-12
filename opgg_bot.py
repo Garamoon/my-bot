@@ -23,8 +23,8 @@ log = logging.getLogger(__name__)
 # ─── Config ──────────────────────────────────────────────────────────────────
 BOT_TOKEN      = os.environ.get("BOT_TOKEN", "YOUR_DISCORD_BOT_TOKEN_HERE")
 BOT_PREFIX     = "!"
-MAX_WORKERS    = 2
-MAX_QUEUE      = 5
+MAX_WORKERS    = 3
+MAX_QUEUE      = 10
 SCRAPE_TIMEOUT = 160
 
 executor    = concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS)
